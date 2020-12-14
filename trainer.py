@@ -165,6 +165,11 @@ def no_args_train(dev_dataloader, test_dataloader, model, device, candidate_k, c
         logger.info(f'*Max dev accuracy: {best_dev_acc} (k={best_k}, T={best_temp})')
     else:
         logger.info(f'*Max dev accuracy: {best_dev_acc} (k={best_k}, T={best_temp}, w/th={best_param})')
+
+    # best_k = 4
+    # best_temp = 1
+    # best_param = 0
+
     logger.info('Start testing.')
     cnt = 0
     test_acc = 0

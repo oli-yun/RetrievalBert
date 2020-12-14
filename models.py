@@ -117,7 +117,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
     """
 
     def __init__(self, pretrain_model, knn_store, num_labels, k, temperature, train_datasets,
-                 fixed_pretrain=False, fixed_knn=False):
+                 knn_embedding_model=None, fixed_pretrain=False, fixed_knn=False):
         super().__init__()
         self.pretrain_model = pretrain_model
         if fixed_pretrain:
@@ -131,6 +131,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
         self.fixed_knn = fixed_knn
 
         self.train_datasets = train_datasets
+        self.knn_embedding_model = knn_embedding_model
 
         self.text_dense = nn.Sequential(
             nn.Linear(768, 768, bias=True),
@@ -150,10 +151,13 @@ class UpdateKNNAdaptiveConcat(nn.Module):
     def forward(self, x_idx, x, x_mask):
         text_rep = self.pretrain_model(x, x_mask)
 
-        if self.training:
-            dists, knns = self.knn_store.get_knns(self.knn_store.keys[x_idx.cpu().numpy()],
-                                                  self.k + 1, change_type=False)
-            dists, knns = dists[:, 1:], knns[:, 1:]
+        if self.training or self.fixed_knn:
+            if self.training:
+                dists, knns = self.knn_store.get_knns(self.knn_store.keys[x_idx.cpu().numpy()],
+                                                      self.k + 1, change_type=False)
+                dists, knns = dists[:, 1:], knns[:, 1:]
+            else:
+                dists, knns = self.knn_store.get_knns(self.knn_embedding_model(x, x_mask), self.k, change_type=True)
             knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
             neighbors = []
             for i in range(self.k):
@@ -176,9 +180,10 @@ class UpdateKNNAdaptiveConcat(nn.Module):
         model_prob = nn.functional.softmax(self.classifier(text_rep), dim=-1)
 
         p_knn = torch.sigmoid(self.get_weight(torch.cat([text_rep, neighbor_rep], dim=-1)))
-        print(p_knn.data)
+        # print(p_knn.data)
         final_prob = torch.log(p_knn * knn_prob.type_as(model_prob) + (1 - p_knn) * model_prob)
         return final_prob
+        # return knn_prob.type_as(model_prob)
 
     def start_train(self):
         self.training = True

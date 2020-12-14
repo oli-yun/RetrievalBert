@@ -63,9 +63,9 @@ def generate_dataloader(args, with_idx=False):
 
     train_dataset, dev_dataset, test_dataset = \
         load_tokenized_dataset(train_path), load_tokenized_dataset(dev_path), load_tokenized_dataset(test_path)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    dev_dataloader = DataLoader(dev_dataset, batch_size=args.batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=10)
+    dev_dataloader = DataLoader(dev_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
 
     return train_dataset, train_dataloader, dev_dataloader, test_dataloader
 
@@ -170,6 +170,7 @@ def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
     knn_store = KNNDstore(args)
     fixed_knn = False if knn_store_file is None else True
     ordered_dataloader = None
+    knn_embedding_model = None
     if fixed_finetune:
         pretrain_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
         knn_store.read_dstore(args.dstore_dir + f'finetune/keys.npy', args.dstore_dir + f'finetune/vals.npy')
@@ -177,6 +178,8 @@ def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
     elif fixed_knn:
         knn_store.read_dstore(knn_store_file[0], knn_store_file[1])
         knn_store.read_index(knn_store_file[2])
+        knn_embedding_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
+        knn_embedding_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
     else:
         pretrain_model.to(device)
         ordered_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
@@ -190,7 +193,7 @@ def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
         knn_store.add_index()
 
     model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.num_labels, args.k, args.temperature,
-                                    train_dataset, fixed_finetune, fixed_knn)
+                                    train_dataset, knn_embedding_model, fixed_finetune, fixed_knn)
     if fixed_finetune:
         model_path = args.model_dir + "fine_tune_with_knn(fixed_finetune).pt"
     elif fixed_knn:
@@ -212,10 +215,11 @@ def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
     # model.load_state_dict(torch.load(args.model_dir + "fine_tune_with_knn(fixed_finetune)-k4.pt"))
 
     model = model.to(device)
-    model.knn_store.load_best()
-    # knn_store_file = [arg.dstore_dir + 'finetune_with_knn(fixed_finetune)-k4/keys.npy.best',
-    #                   arg.dstore_dir + 'finetune_with_knn(fixed_finetune)-k4/vals.npy.best',
-    #                   arg.faiss_dir + 'finetune_with_knn(fixed_finetune)-k4/index.best']
+    if not fixed_knn:
+        model.knn_store.load_best()
+    # knn_store_file = [arg.dstore_dir + 'finetune_with_knn(fixed_knn)/keys.npy.best',
+    #                   arg.dstore_dir + 'finetune_with_knn(fixed_knn)/vals.npy.best',
+    #                   arg.faiss_dir + 'finetune_with_knn(fixed_knn)/index.best']
     # model.knn_store.read_dstore(knn_store_file[0], knn_store_file[1])
     # model.knn_store.read_index(knn_store_file[2])
 
@@ -297,7 +301,9 @@ if __name__ == '__main__':
     # fine_tune_pretrain_model_generate_datastore(arg)
     # run_no_arg_knn(arg)
     # fine_tune_with_knn(arg)
-    fine_tune_with_knn(arg, fixed_finetune=True)
-    # fine_tune_with_knn(arg, knn_store_file=[arg.dstore_dir + 'finetune/keys.npy',
-    #                                         arg.dstore_dir + 'finetune/vals.npy', arg.faiss_dir + 'finetune/index'])
+    # fine_tune_with_knn(arg, fixed_finetune=True)
+    fine_tune_with_knn(arg, knn_store_file=[arg.dstore_dir + 'finetune/keys.npy',
+                                            arg.dstore_dir + 'finetune/vals.npy',
+                                            arg.faiss_dir + 'finetune/index'])
     # metric_learning(arg, triplet=True)
+    # metric_learning(arg, triplet=False)
