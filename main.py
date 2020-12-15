@@ -126,6 +126,8 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
         model_path = args.model_dir + "fine_tune_with_knn(fixed_finetune).pt"
     elif fixed_knn:
         model_path = args.model_dir + "fine_tune_with_knn(fixed_knn).pt"
+    elif only_knn:
+        model_path = args.model_dir + "fine_tune_with_knn(only_knn).pt"
     else:
         model_path = args.model_dir + "fine_tune_with_knn.pt"
 
@@ -140,7 +142,6 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
 
     logger.info('Test model with best performance')
     model.load_state_dict(torch.load(model_path))
-    # model.load_state_dict(torch.load(args.model_dir + "fine_tune_with_knn(fixed_finetune)-k4.pt"))
 
     model = model.to(device)
     if not fixed_knn:
@@ -225,6 +226,7 @@ def metric_learning(args, triplet=False):
 if __name__ == '__main__':
     arg = parse()
     set_seed(arg.seed)
+
     check_dir(arg)  # run at the very start
     preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
