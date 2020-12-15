@@ -22,7 +22,7 @@ def parse():
 
     parser.add_argument('--num_labels', type=int, default=2)
     parser.add_argument('--seed', type=int, default=1024)
-    parser.add_argument('--epochs', type=int, default=20)  # 10
+    parser.add_argument('--epochs', type=int, default=10)  # 10
     parser.add_argument('--batch_size', type=int, default=16)  # 16/128
     parser.add_argument('--lr', type=float, default=1e-5)
 
