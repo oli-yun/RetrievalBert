@@ -1,82 +1,21 @@
-import os
 import torch
 from tqdm import tqdm
 import torch.nn as nn
 import time
 import numpy as np
 from loguru import logger
-from transformers import AutoTokenizer, AdamW, get_linear_schedule_with_warmup
 from torch.utils.data import DataLoader
 from models import PreTrainModel, OnlyKNN, KNNBackoff, KNNStaticConcat, UpdateKNNAdaptiveConcat
 from knn import KNNDstore
 from parameters import parse
-from datasets import load_sst2, SST2Dataset, save_tokenized_dataset, load_tokenized_dataset, BalancedBatchSampler
-from utils import EarlyStopping, SemihardNegativeTripletSelector, HardNegativePairSelector
+from datasets import load_tokenized_dataset, BalancedBatchSampler, generate_dataloader, preprocess_data
+from utils import EarlyStopping, SemihardNegativeTripletSelector, HardNegativePairSelector, set_seed, check_dir, \
+    get_optimizer
 from trainer import fit, test_epoch, no_args_train
 from metrics import AccumulatedAccuracyMetric
 from losses import OnlineTripletLoss, OnlineContrastiveLoss
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
-def check_dir(args):
-    if not os.path.exists(args.model_dir):
-        os.mkdir(args.model_dir)
-    if not os.path.exists(args.log_dir):
-        os.mkdir(args.log_dir)
-    if not os.path.exists(args.dstore_dir):
-        os.mkdir(args.dstore_dir)
-    if not os.path.exists(args.dstore_dir + 'finetune/'):
-        os.mkdir(args.dstore_dir + 'finetune')
-    if not os.path.exists(args.faiss_dir):
-        os.mkdir(args.faiss_dir)
-    if not os.path.exists(args.tokenized_data_dir):
-        os.mkdir(args.tokenized_data_dir)
-
-
-def preprocess_data(args):
-    tokenizer = AutoTokenizer.from_pretrained(args.pretrain_model_name)
-
-    train_data, train_labels = load_sst2(args.data_dir + args.train_path)
-    dev_data, dev_labels = load_sst2(args.data_dir + args.dev_path)
-    test_data, test_labels = load_sst2(args.data_dir + args.test_path)
-
-    train_dataset = SST2Dataset(train_data, train_labels, tokenizer)
-    save_tokenized_dataset(args.tokenized_data_dir + 'train', train_dataset)
-    dev_dataset = SST2Dataset(dev_data, dev_labels, tokenizer)
-    save_tokenized_dataset(args.tokenized_data_dir + 'dev', dev_dataset)
-    test_dataset = SST2Dataset(test_data, test_labels, tokenizer)
-    save_tokenized_dataset(args.tokenized_data_dir + 'test', test_dataset)
-
-    train_dataset_with_idx = SST2Dataset(train_data, train_labels, tokenizer, return_idx=True)
-    save_tokenized_dataset(args.tokenized_data_dir + 'train_with_idx', train_dataset_with_idx)
-    dev_dataset_with_idx = SST2Dataset(dev_data, dev_labels, tokenizer, return_idx=True)
-    save_tokenized_dataset(args.tokenized_data_dir + 'dev_with_idx', dev_dataset_with_idx)
-    test_dataset_with_idx = SST2Dataset(test_data, test_labels, tokenizer, return_idx=True)
-    save_tokenized_dataset(args.tokenized_data_dir + 'test_with_idx', test_dataset_with_idx)
-
-
-def generate_dataloader(args, with_idx=False):
-    train_path = args.tokenized_data_dir + 'train_with_idx' if with_idx else args.tokenized_data_dir + 'train'
-    dev_path = args.tokenized_data_dir + 'dev_with_idx' if with_idx else args.tokenized_data_dir + 'dev'
-    test_path = args.tokenized_data_dir + 'test_with_idx' if with_idx else args.tokenized_data_dir + 'test'
-
-    train_dataset, dev_dataset, test_dataset = \
-        load_tokenized_dataset(train_path), load_tokenized_dataset(dev_path), load_tokenized_dataset(test_path)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-    dev_dataloader = DataLoader(dev_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
-
-    return train_dataset, train_dataloader, dev_dataloader, test_dataloader
-
-
-def get_optimizer(args, model, train_dataloader):
-    optimizer = AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.98), weight_decay=0.1)
-    total_steps = len(train_dataloader) * args.epochs
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer, num_warmup_steps=0.06 * total_steps, num_training_steps=total_steps)
-
-    return optimizer, scheduler
 
 
 def fine_tune_pretrain_model_generate_datastore(args):
@@ -158,7 +97,7 @@ def run_no_arg_knn(args):
     logger.success("Done!")
 
 
-def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
+def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=False):
     start_time = time.strftime("-%Y-%m-%d", time.localtime())
     logger.add(args.log_dir + 'update_dstore_adaptive_weight' + start_time + '.log')
     logger.info("Load data.")
@@ -167,33 +106,22 @@ def fine_tune_with_knn(args, fixed_finetune=False, knn_store_file=None):
 
     logger.info("Load model.")
     pretrain_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
+    pretrain_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
     knn_store = KNNDstore(args)
-    fixed_knn = False if knn_store_file is None else True
+    knn_store.read_dstore(args.dstore_dir + f'finetune/keys.npy', args.dstore_dir + f'finetune/vals.npy')
+    knn_store.read_index(arg.faiss_dir + 'finetune/index')
+
     ordered_dataloader = None
     knn_embedding_model = None
-    if fixed_finetune:
-        pretrain_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
-        knn_store.read_dstore(args.dstore_dir + f'finetune/keys.npy', args.dstore_dir + f'finetune/vals.npy')
-        knn_store.add_index()
-    elif fixed_knn:
-        knn_store.read_dstore(knn_store_file[0], knn_store_file[1])
-        knn_store.read_index(knn_store_file[2])
+    if fixed_knn:
         knn_embedding_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
         knn_embedding_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
-    else:
+    elif not fixed_knn and not fixed_finetune:
         pretrain_model.to(device)
         ordered_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
-        logger.info('Generate Datastore.')
-        for i, (data, target) in enumerate(tqdm(ordered_dataloader)):
-            with torch.no_grad():
-                data = tuple(d.to(device) for d in data)
-                target = target.unsqueeze(-1)
-                output = pretrain_model(*data)
-                knn_store.write_dstore(output, target, i * args.batch_size, args.batch_size)
-        knn_store.add_index()
 
     model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.num_labels, args.k, args.temperature,
-                                    train_dataset, knn_embedding_model, fixed_finetune, fixed_knn)
+                                    train_dataset, knn_embedding_model, fixed_finetune, fixed_knn, only_knn)
     if fixed_finetune:
         model_path = args.model_dir + "fine_tune_with_knn(fixed_finetune).pt"
     elif fixed_knn:
@@ -296,14 +224,14 @@ def metric_learning(args, triplet=False):
 
 if __name__ == '__main__':
     arg = parse()
-    # check_dir(arg)  # run at the very start
-    # preprocess_data(arg)  # run at the very start
+    set_seed(arg.seed)
+    check_dir(arg)  # run at the very start
+    preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
     # run_no_arg_knn(arg)
     # fine_tune_with_knn(arg)
     # fine_tune_with_knn(arg, fixed_finetune=True)
-    fine_tune_with_knn(arg, knn_store_file=[arg.dstore_dir + 'finetune/keys.npy',
-                                            arg.dstore_dir + 'finetune/vals.npy',
-                                            arg.faiss_dir + 'finetune/index'])
+    # fine_tune_with_knn(arg, fixed_knn=True)
+    # fine_tune_with_knn(arg, only_knn=True)
     # metric_learning(arg, triplet=True)
     # metric_learning(arg, triplet=False)

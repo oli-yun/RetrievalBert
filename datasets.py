@@ -3,6 +3,8 @@ import torch
 import pickle
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import BatchSampler
+from transformers import AutoTokenizer
+from torch.utils.data import DataLoader
 
 
 class SST2Dataset(Dataset):
@@ -91,3 +93,39 @@ def load_tokenized_dataset(save_path):
 def save_pkl(obj, save_path):
     with open(save_path, 'wb') as f:
         pickle.dump(obj, f)
+
+
+def preprocess_data(args):
+    tokenizer = AutoTokenizer.from_pretrained(args.pretrain_model_name)
+
+    train_data, train_labels = load_sst2(args.data_dir + args.train_path)
+    dev_data, dev_labels = load_sst2(args.data_dir + args.dev_path)
+    test_data, test_labels = load_sst2(args.data_dir + args.test_path)
+
+    train_dataset = SST2Dataset(train_data, train_labels, tokenizer)
+    save_tokenized_dataset(args.tokenized_data_dir + 'train', train_dataset)
+    dev_dataset = SST2Dataset(dev_data, dev_labels, tokenizer)
+    save_tokenized_dataset(args.tokenized_data_dir + 'dev', dev_dataset)
+    test_dataset = SST2Dataset(test_data, test_labels, tokenizer)
+    save_tokenized_dataset(args.tokenized_data_dir + 'test', test_dataset)
+
+    train_dataset_with_idx = SST2Dataset(train_data, train_labels, tokenizer, return_idx=True)
+    save_tokenized_dataset(args.tokenized_data_dir + 'train_with_idx', train_dataset_with_idx)
+    dev_dataset_with_idx = SST2Dataset(dev_data, dev_labels, tokenizer, return_idx=True)
+    save_tokenized_dataset(args.tokenized_data_dir + 'dev_with_idx', dev_dataset_with_idx)
+    test_dataset_with_idx = SST2Dataset(test_data, test_labels, tokenizer, return_idx=True)
+    save_tokenized_dataset(args.tokenized_data_dir + 'test_with_idx', test_dataset_with_idx)
+
+
+def generate_dataloader(args, with_idx=False):
+    train_path = args.tokenized_data_dir + 'train_with_idx' if with_idx else args.tokenized_data_dir + 'train'
+    dev_path = args.tokenized_data_dir + 'dev_with_idx' if with_idx else args.tokenized_data_dir + 'dev'
+    test_path = args.tokenized_data_dir + 'test_with_idx' if with_idx else args.tokenized_data_dir + 'test'
+
+    train_dataset, dev_dataset, test_dataset = \
+        load_tokenized_dataset(train_path), load_tokenized_dataset(dev_path), load_tokenized_dataset(test_path)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=10)
+    dev_dataloader = DataLoader(dev_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=10)
+
+    return train_dataset, train_dataloader, dev_dataloader, test_dataloader

@@ -1,7 +1,10 @@
+import os
 import torch
+import random
 import numpy as np
 from loguru import logger
 from itertools import combinations
+from transformers import AdamW, get_linear_schedule_with_warmup
 
 
 class EarlyStopping:
@@ -188,3 +191,35 @@ def semihard_negative(loss_values, margin):
 def SemihardNegativeTripletSelector(margin, cpu=False):
     return FunctionNegativeTripletSelector(
         margin=margin, negative_selection_fn=lambda x: semihard_negative(x, margin), cpu=cpu)
+
+
+def check_dir(args):
+    if not os.path.exists(args.model_dir):
+        os.mkdir(args.model_dir)
+    if not os.path.exists(args.log_dir):
+        os.mkdir(args.log_dir)
+    if not os.path.exists(args.dstore_dir):
+        os.mkdir(args.dstore_dir)
+    if not os.path.exists(args.dstore_dir + 'finetune/'):
+        os.mkdir(args.dstore_dir + 'finetune')
+    if not os.path.exists(args.faiss_dir):
+        os.mkdir(args.faiss_dir)
+    if not os.path.exists(args.tokenized_data_dir):
+        os.mkdir(args.tokenized_data_dir)
+
+
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def get_optimizer(args, model, train_dataloader):
+    optimizer = AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.98), weight_decay=0.1)
+    total_steps = len(train_dataloader) * args.epochs
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, num_warmup_steps=0.06 * total_steps, num_training_steps=total_steps)
+
+    return optimizer, scheduler

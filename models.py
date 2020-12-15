@@ -117,7 +117,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
     """
 
     def __init__(self, pretrain_model, knn_store, num_labels, k, temperature, train_datasets,
-                 knn_embedding_model=None, fixed_pretrain=False, fixed_knn=False):
+                 knn_embedding_model=None, fixed_pretrain=False, fixed_knn=False, only_knn=False):
         super().__init__()
         self.pretrain_model = pretrain_model
         if fixed_pretrain:
@@ -129,6 +129,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
         self.k = k
         self.temperature = temperature
         self.fixed_knn = fixed_knn
+        self.only_knn = only_knn
 
         self.train_datasets = train_datasets
         self.knn_embedding_model = knn_embedding_model
@@ -150,6 +151,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
 
     def forward(self, x_idx, x, x_mask):
         text_rep = self.pretrain_model(x, x_mask)
+        neighbors = None
 
         if self.training or self.fixed_knn:
             if self.training:
@@ -159,31 +161,36 @@ class UpdateKNNAdaptiveConcat(nn.Module):
             else:
                 dists, knns = self.knn_store.get_knns(self.knn_embedding_model(x, x_mask), self.k, change_type=True)
             knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
-            neighbors = []
-            for i in range(self.k):
-                train_neighbors, _ = self.train_datasets[knns[:, i]]
-                neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
-                neighbors.append(neighbor.unsqueeze(dim=1))
-            neighbors = torch.cat(neighbors, dim=1)
+            if not self.only_knn:
+                neighbors = []
+                for i in range(self.k):
+                    train_neighbors, _ = self.train_datasets[knns[:, i]]
+                    neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
+                    neighbors.append(neighbor.unsqueeze(dim=1))
+                neighbors = torch.cat(neighbors, dim=1)
         else:
             dists, knns = self.knn_store.get_knns(text_rep, self.k, change_type=True)
             knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
-            neighbors = torch.from_numpy(self.knn_store.keys[knns]).type_as(text_rep)
+            if not self.only_knn:
+                neighbors = torch.from_numpy(self.knn_store.keys[knns]).type_as(text_rep)
 
-        dists = torch.from_numpy(-1 * dists)
-        neighbor_probs = torch.nn.functional.softmax(dists / self.temperature, dim=-1).type_as(text_rep)
-        neighbor_probs = neighbor_probs.unsqueeze(dim=-1).repeat(1, 1, 768)
-        neighbor_rep = torch.sum(torch.mul(neighbor_probs, neighbors), dim=1)
-        neighbor_rep = self.neighbor_dense(neighbor_rep)
+        if self.only_knn:
+            return torch.log(knn_prob)
+        else:
+            dists = torch.from_numpy(-1 * dists)
+            neighbor_probs = torch.nn.functional.softmax(dists / self.temperature, dim=-1).type_as(text_rep)
+            neighbor_probs = neighbor_probs.unsqueeze(dim=-1).repeat(1, 1, 768)
+            neighbor_rep = torch.sum(torch.mul(neighbor_probs, neighbors), dim=1)
+            neighbor_rep = self.neighbor_dense(neighbor_rep)
 
-        text_rep = self.text_dense(text_rep)
-        model_prob = nn.functional.softmax(self.classifier(text_rep), dim=-1)
+            text_rep = self.text_dense(text_rep)
+            model_prob = nn.functional.softmax(self.classifier(text_rep), dim=-1)
 
-        p_knn = torch.sigmoid(self.get_weight(torch.cat([text_rep, neighbor_rep], dim=-1)))
-        # print(p_knn.data)
-        final_prob = torch.log(p_knn * knn_prob.type_as(model_prob) + (1 - p_knn) * model_prob)
-        return final_prob
-        # return knn_prob.type_as(model_prob)
+            p_knn = torch.sigmoid(self.get_weight(torch.cat([text_rep, neighbor_rep], dim=-1)))
+            # print(p_knn.data)
+            final_prob = torch.log(p_knn * knn_prob.type_as(model_prob) + (1 - p_knn) * model_prob)
+            return final_prob
+            # return knn_prob.type_as(model_prob)
 
     def start_train(self):
         self.training = True

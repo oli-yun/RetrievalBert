@@ -14,23 +14,26 @@ args = parse()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # modify
-train_dataset = load_tokenized_dataset(args.tokenized_data_dir + 'train')
-# train_dataset = load_tokenized_dataset(args.tokenized_data_dir + 'test')
+# train_dataset = load_tokenized_dataset(args.tokenized_data_dir + 'train')
+train_dataset = load_tokenized_dataset(args.tokenized_data_dir + 'test')
 train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
 pretrain_model = PreTrainModel(args.pretrain_model_name, num_labels=args.num_labels, only_return_hidden_states=True).to(
     device)
+knn_embedding_model = PreTrainModel(args.pretrain_model_name, num_labels=args.num_labels, only_return_hidden_states=True)\
+    .to(device)
+knn_embedding_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
 knn_store = KNNDstore(args)
-knn_store.read_dstore('./dstore/finetune_with_knn/keys.npy.best', './dstore/finetune_with_knn/vals.npy.best')
-knn_store.read_index('./faiss/finetune_with_knn/index.best')
+knn_store.read_dstore('./dstore/finetune/keys.npy', './dstore/finetune/vals.npy')
+knn_store.read_index('./faiss/finetune/index')
 model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.num_labels, args.k, args.temperature,
-                                train_dataset)
-model_path = args.model_dir + 'fine_tune_with_knn.pt'
+                                train_dataset, knn_embedding_model=knn_embedding_model)
+model_path = args.model_dir + 'fine_tune_with_knn(fixed_knn).pt'
 model.load_state_dict(torch.load(model_path))
 # modify
 
-keys = np.zeros((67349, 768), dtype=np.float32)  # 67349/1821
-vals = np.zeros((67349, 1), dtype=np.int)  # 67349/1821
+keys = np.zeros((1821, 768), dtype=np.float32)  # 67349/1821
+vals = np.zeros((1821, 1), dtype=np.int)  # 67349/1821
 
 for i, (data, target) in enumerate(tqdm(train_dataloader)):
     b_data = tuple(d.to(device) for d in data)

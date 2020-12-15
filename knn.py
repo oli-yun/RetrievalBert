@@ -6,7 +6,6 @@ from loguru import logger
 
 class KNNDstore(object):
     def __init__(self, args):
-        np.random.seed(args.seed)
         self.dimension = 768
         self.dstore_size = args.dstore_size
         self.classes_num = args.num_labels
