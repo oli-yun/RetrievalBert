@@ -45,8 +45,8 @@ def fine_tune_pretrain_model_generate_datastore(args):
     logger.success(message)
 
     logger.info('Generate datastore.')
-    model = PreTrainModel(args.pretrain_model_name, num_labels=args.num_labels, only_return_hidden_states=True) \
-        .to(device)
+    model.only_return_hidden_states = True
+    model.only_return_logits = False
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
     keys = np.memmap(args.dstore_dir + f'finetune/keys.npy', dtype=np.float32, mode='w+',
@@ -117,7 +117,6 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
         knn_embedding_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
         knn_embedding_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
     elif not fixed_knn and not fixed_finetune:
-        pretrain_model.to(device)
         ordered_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
     model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.num_labels, args.k, args.temperature,
@@ -228,10 +227,10 @@ if __name__ == '__main__':
     set_seed(arg.seed)
 
     check_dir(arg)  # run at the very start
-    preprocess_data(arg)  # run at the very start
+    # preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
     # run_no_arg_knn(arg)
-    # fine_tune_with_knn(arg)
+    fine_tune_with_knn(arg)
     # fine_tune_with_knn(arg, fixed_finetune=True)
     # fine_tune_with_knn(arg, fixed_knn=True)
     # fine_tune_with_knn(arg, only_knn=True)

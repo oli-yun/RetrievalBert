@@ -190,6 +190,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
             # print(p_knn.data)
             final_prob = torch.log(p_knn * knn_prob.type_as(model_prob) + (1 - p_knn) * model_prob)
             return final_prob
+            # return model_prob
             # return knn_prob.type_as(model_prob)
 
     def start_train(self):

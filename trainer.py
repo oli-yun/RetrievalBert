@@ -90,6 +90,7 @@ def fit(train_dataloader, dev_dataloader, model, loss_fn, optimizer, scheduler, 
             logger.info("Update datastore.")
             batch_size = 0
             logger.info('Generate Datastore.')
+            model.knn_store.reset_dstore()
             for i, (data, target) in enumerate(tqdm(ordered_dataloader)):
                 if batch_size == 0: batch_size = target.size()[0]
                 with torch.no_grad():
@@ -167,8 +168,8 @@ def no_args_train(dev_dataloader, test_dataloader, model, device, candidate_k, c
         logger.info(f'*Max dev accuracy: {best_dev_acc} (k={best_k}, T={best_temp}, w/th={best_param})')
 
     # best_k = 4
-    # best_temp = 1
-    # best_param = 0
+    # best_temp = 10
+    # best_param = 0.5
 
     logger.info('Start testing.')
     cnt = 0

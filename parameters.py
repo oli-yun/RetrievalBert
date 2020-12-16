@@ -5,7 +5,7 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--pretrain_model_name', type=str, default='roberta-base',
                         choices=['bert-base-uncased', 'roberta-base'])
-    parser.add_argument('--no_arg_way', type=str, default='knn_only',
+    parser.add_argument('--no_arg_way', type=str, default='static_weighted_concat',
                         choices=['knn_only', 'knn_backoff', 'static_weighted_concat'])
     parser.add_argument('--test_no_arg', action='store_true')
 
@@ -29,7 +29,7 @@ def parse():
     parser.add_argument('--clusters_num', type=int, default=4)
     parser.add_argument('--nprobe', type=int, default=1)
     parser.add_argument('--k', type=int, default=4)
-    parser.add_argument('--temperature', type=int, default=1)
+    parser.add_argument('--temperature', type=int, default=10)
     parser.add_argument('--knn_weight', type=float, default=0.1)
     parser.add_argument('--threshold', type=float, default=0.9)
     parser.add_argument('--dstore_size', type=int, default=67349)

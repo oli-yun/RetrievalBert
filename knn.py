@@ -30,6 +30,10 @@ class KNNDstore(object):
         index = faiss.IndexIDMap2(index)
         return index
 
+    def reset_dstore(self):
+        self.keys = np.memmap(self.keys_path, dtype=np.float32, mode='w+', shape=(self.dstore_size, 768))
+        self.vals = np.memmap(self.vals_path, dtype=np.int, mode='w+', shape=(self.dstore_size, 1))
+
     def write_dstore(self, embedding, labels, start_idx, data_size):
         self.keys[start_idx: min(self.dstore_size, start_idx + data_size)] = embedding.cpu().numpy()
         self.vals[start_idx: min(self.dstore_size, start_idx + data_size)] = labels.cpu().numpy()

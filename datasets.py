@@ -5,6 +5,8 @@ from torch.utils.data import Dataset
 from torch.utils.data.sampler import BatchSampler
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
+import random
+from operator import itemgetter
 
 
 class SST2Dataset(Dataset):
@@ -78,6 +80,16 @@ def load_sst2(data_path):
     return all_data, all_label
 
 
+def load_partial_data(data_path, ratio):
+    all_data, all_label = load_sst2(data_path)
+    data_size = len(all_data)
+    select_indices = random.sample(range(data_size), int(ratio * data_size))
+    select_data = itemgetter(*select_indices)(all_data)
+    select_label = itemgetter(*select_indices)(all_label)
+
+    return select_data, select_label
+
+
 def save_tokenized_dataset(save_path, obj):
     with open(save_path, 'wb') as f:
         torch.save(obj, f)
@@ -98,7 +110,8 @@ def save_pkl(obj, save_path):
 def preprocess_data(args):
     tokenizer = AutoTokenizer.from_pretrained(args.pretrain_model_name)
 
-    train_data, train_labels = load_sst2(args.data_dir + args.train_path)
+    # train_data, train_labels = load_sst2(args.data_dir + args.train_path)
+    train_data, train_labels = load_partial_data(args.data_dir + args.train_path, 0.3)
     dev_data, dev_labels = load_sst2(args.data_dir + args.dev_path)
     test_data, test_labels = load_sst2(args.data_dir + args.test_path)
 
