@@ -96,7 +96,7 @@ def fit(train_dataloader, dev_dataloader, model, loss_fn, optimizer, scheduler, 
                 with torch.no_grad():
                     data = tuple(d.to(device) for d in data)
                     target = target.unsqueeze(-1)
-                    output = model.pretrain_model(*data)
+                    _, output = model.pretrain_model(*data)
                     model.knn_store.write_dstore(output, target, i * batch_size, batch_size)
             model.knn_store.add_index()
 

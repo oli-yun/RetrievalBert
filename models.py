@@ -9,6 +9,7 @@ class PreTrainModel(nn.Module):
         self.model = AutoModelForSequenceClassification.from_pretrained(pretrain_model_name, num_labels=num_labels)
         self.only_return_hidden_states = only_return_hidden_states
         self.only_return_logits = only_return_logits
+        self.training = True
 
     def forward(self, x, x_mask):
         outputs = self.model(x, x_mask, return_dict=True, output_hidden_states=True)
@@ -18,6 +19,12 @@ class PreTrainModel(nn.Module):
             return outputs.hidden_states[-1][:, 0, :]
         else:
             return outputs.logits, outputs.hidden_states[-1][:, 0, :]
+
+    def start_train(self):
+        self.training = True
+
+    def start_test(self):
+        self.training = False
 
 
 class NoArgKNN(nn.Module):
