@@ -35,8 +35,8 @@ class KNNDstore(object):
         self.vals = np.memmap(self.vals_path, dtype=np.int, mode='w+', shape=(self.dstore_size, 1))
 
     def write_dstore(self, embedding, labels, start_idx, data_size):
-        self.keys[start_idx: min(self.dstore_size, start_idx + data_size)] = embedding.cpu().numpy()
-        self.vals[start_idx: min(self.dstore_size, start_idx + data_size)] = labels.cpu().numpy()
+        self.keys[start_idx: min(self.dstore_size, start_idx + data_size)] = embedding.detach().cpu().numpy()
+        self.vals[start_idx: min(self.dstore_size, start_idx + data_size)] = labels.detach().cpu().numpy()
         if start_idx + data_size >= self.dstore_size:
             self.valid_dstore = False
 

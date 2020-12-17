@@ -110,8 +110,8 @@ def save_pkl(obj, save_path):
 def preprocess_data(args):
     tokenizer = AutoTokenizer.from_pretrained(args.pretrain_model_name)
 
-    # train_data, train_labels = load_sst2(args.data_dir + args.train_path)
-    train_data, train_labels = load_partial_data(args.data_dir + args.train_path, 0.3)
+    train_data, train_labels = load_sst2(args.data_dir + args.train_path)
+    # train_data, train_labels = load_partial_data(args.data_dir + args.train_path, 0.3)
     dev_data, dev_labels = load_sst2(args.data_dir + args.dev_path)
     test_data, test_labels = load_sst2(args.data_dir + args.test_path)
 

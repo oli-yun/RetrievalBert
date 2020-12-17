@@ -6,28 +6,18 @@ from transformers import AutoModel, AutoModelForSequenceClassification
 class PreTrainModel(nn.Module):
     def __init__(self, pretrain_model_name, num_labels, only_return_hidden_states=False, only_return_logits=False):
         super(PreTrainModel, self).__init__()
+        self.model = AutoModelForSequenceClassification.from_pretrained(pretrain_model_name, num_labels=num_labels)
         self.only_return_hidden_states = only_return_hidden_states
         self.only_return_logits = only_return_logits
-        self.model = AutoModelForSequenceClassification.from_pretrained(pretrain_model_name, num_labels=num_labels)
-        self.training = True
-        if self.only_return_hidden_states:
-            for param in self.model.classifier.parameters():
-                param.requires_grad = False
 
     def forward(self, x, x_mask):
         outputs = self.model(x, x_mask, return_dict=True, output_hidden_states=True)
-        if self.only_return_hidden_states:
-            return outputs.hidden_states[-1][:, 0, :]
-        elif self.only_return_logits:
+        if self.only_return_logits:
             return outputs.logits
+        elif self.only_return_hidden_states:
+            return outputs.hidden_states[-1][:, 0, :]
         else:
             return outputs.logits, outputs.hidden_states[-1][:, 0, :]
-
-    def start_train(self):
-        self.training = True
-
-    def start_test(self):
-        self.training = False
 
 
 class NoArgKNN(nn.Module):
@@ -68,6 +58,7 @@ class OnlyKNN(NoArgKNN):
     Fine tune pretrain model for the sequence classification task.
     Use the [CLS] token as embedding for kNN.
     """
+
     def __init__(self, pretrain_model, knn_store):
         super().__init__(pretrain_model, knn_store)
 
@@ -82,6 +73,7 @@ class KNNBackoff(NoArgKNN):
     The same as FineTuneKNN
     But use KNN predictions as backoff.
     """
+
     def __init__(self, pretrain_model, knn_store):
         super().__init__(pretrain_model, knn_store)
 
@@ -100,6 +92,7 @@ class KNNStaticConcat(NoArgKNN):
     The same as FineTuneKNN
     But concat KNN predictions with pretrain model predictions.
     """
+
     def __init__(self, pretrain_model, knn_store):
         super().__init__(pretrain_model, knn_store)
 
@@ -116,41 +109,39 @@ class UpdateKNNAdaptiveConcat(nn.Module):
     when training, retrieval use the representation in datastore, the weight computation use the updated representation.
     """
 
-    def __init__(self, pretrain_model, knn_store, num_labels, k, temperature, train_datasets,
+    def __init__(self, pretrain_model, knn_store, k, temperature, train_datasets,
                  knn_embedding_model=None, fixed_pretrain=False, fixed_knn=False, only_knn=False):
         super().__init__()
+        self.training = True
+
         self.pretrain_model = pretrain_model
         if fixed_pretrain:
             for param in self.pretrain_model.parameters():
                 param.requires_grad = False
-        self.training = True
+
+        self.knn_embedding_model = knn_embedding_model
+        if self.knn_embedding_model is not None:
+            for param in self.knn_embedding_model.parameters():
+                param.requires_grad = False
 
         self.knn_store = knn_store
         self.k = k
         self.temperature = temperature
         self.fixed_knn = fixed_knn
         self.only_knn = only_knn
-
         self.train_datasets = train_datasets
-        self.knn_embedding_model = knn_embedding_model
 
-        self.text_dense = nn.Sequential(
-            nn.Linear(768, 768, bias=True),
-            nn.Dropout(p=0.1, inplace=False)
+        self.get_weight = nn.Sequential(
+            nn.Linear(768 * 2, 768 * 2),
+            nn.Dropout(p=0.1, inplace=False),
+            nn.Linear(768 * 2, 1)
         )
-        weight_init(self.text_dense[0])
-        self.neighbor_dense = nn.Sequential(
-            nn.Linear(768, 768, bias=True),
-            nn.Dropout(p=0.1, inplace=False)
-        )
-        weight_init(self.neighbor_dense[0])
-        self.classifier = nn.Linear(768, num_labels, bias=True)
-        weight_init(self.classifier)
-        self.get_weight = nn.Linear(768 * 2, 1, bias=True)
-        weight_init(self.get_weight)
+
+        weight_init(self.get_weight[0])
+        weight_init(self.get_weight[2])
 
     def forward(self, x_idx, x, x_mask):
-        text_rep = self.pretrain_model(x, x_mask)
+        model_prob, text_rep = self.pretrain_model(x, x_mask)
         neighbors = None
 
         if self.training or self.fixed_knn:
@@ -165,7 +156,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
                 neighbors = []
                 for i in range(self.k):
                     train_neighbors, _ = self.train_datasets[knns[:, i]]
-                    neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
+                    _, neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
                     neighbors.append(neighbor.unsqueeze(dim=1))
                 neighbors = torch.cat(neighbors, dim=1)
         else:
@@ -175,16 +166,12 @@ class UpdateKNNAdaptiveConcat(nn.Module):
                 neighbors = torch.from_numpy(self.knn_store.keys[knns]).type_as(text_rep)
 
         if self.only_knn:
-            return torch.log(knn_prob)
+            return torch.log(knn_prob.type_as(model_prob))
         else:
             dists = torch.from_numpy(-1 * dists)
             neighbor_probs = torch.nn.functional.softmax(dists / self.temperature, dim=-1).type_as(text_rep)
             neighbor_probs = neighbor_probs.unsqueeze(dim=-1).repeat(1, 1, 768)
             neighbor_rep = torch.sum(torch.mul(neighbor_probs, neighbors), dim=1)
-            neighbor_rep = self.neighbor_dense(neighbor_rep)
-
-            text_rep = self.text_dense(text_rep)
-            model_prob = nn.functional.softmax(self.classifier(text_rep), dim=-1)
 
             p_knn = torch.sigmoid(self.get_weight(torch.cat([text_rep, neighbor_rep], dim=-1)))
             # print(p_knn.data)
@@ -203,4 +190,3 @@ class UpdateKNNAdaptiveConcat(nn.Module):
 def weight_init(module):
     module.weight.data.normal_(mean=0.0, std=0.02)
     module.bias.data.zero_()
-

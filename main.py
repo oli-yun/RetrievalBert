@@ -105,11 +105,11 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
     _, train_dataloader, dev_dataloader, test_dataloader = generate_dataloader(args, with_idx=True)
 
     logger.info("Load model.")
-    pretrain_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
+    pretrain_model = PreTrainModel(args.pretrain_model_name, args.num_labels)
     pretrain_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
     knn_store = KNNDstore(args)
     knn_store.read_dstore(args.dstore_dir + f'finetune/keys.npy', args.dstore_dir + f'finetune/vals.npy')
-    knn_store.read_index(arg.faiss_dir + 'finetune/index')
+    knn_store.add_index()
 
     ordered_dataloader = None
     knn_embedding_model = None
@@ -119,8 +119,8 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
     elif not fixed_knn and not fixed_finetune:
         ordered_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
-    model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.num_labels, args.k, args.temperature,
-                                    train_dataset, knn_embedding_model, fixed_finetune, fixed_knn, only_knn)
+    model = UpdateKNNAdaptiveConcat(pretrain_model, knn_store, args.k, args.temperature, train_dataset,
+                                    knn_embedding_model, fixed_finetune, fixed_knn, only_knn)
     if fixed_finetune:
         model_path = args.model_dir + "fine_tune_with_knn(fixed_finetune).pt"
     elif fixed_knn:
@@ -145,11 +145,6 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
     model = model.to(device)
     if not fixed_knn:
         model.knn_store.load_best()
-    # knn_store_file = [arg.dstore_dir + 'finetune_with_knn(fixed_knn)/keys.npy.best',
-    #                   arg.dstore_dir + 'finetune_with_knn(fixed_knn)/vals.npy.best',
-    #                   arg.faiss_dir + 'finetune_with_knn(fixed_knn)/index.best']
-    # model.knn_store.read_dstore(knn_store_file[0], knn_store_file[1])
-    # model.knn_store.read_index(knn_store_file[2])
 
     model.start_test()
     test_loss, metric = test_epoch(test_dataloader, model, criterion, device, metric)
@@ -230,8 +225,8 @@ if __name__ == '__main__':
     # preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
     # run_no_arg_knn(arg)
-    fine_tune_with_knn(arg)
-    # fine_tune_with_knn(arg, fixed_finetune=True)
+    # fine_tune_with_knn(arg)
+    fine_tune_with_knn(arg, fixed_finetune=True)
     # fine_tune_with_knn(arg, fixed_knn=True)
     # fine_tune_with_knn(arg, only_knn=True)
     # metric_learning(arg, triplet=True)

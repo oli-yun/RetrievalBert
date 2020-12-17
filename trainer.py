@@ -18,7 +18,6 @@ def train_epoch(train_dataloader, model, loss_fn, optimizer, scheduler, device, 
 
         model.zero_grad()
         outputs = model(*data)
-
         loss_inputs = (outputs,) if type(outputs) not in (tuple, list) else outputs
         loss_inputs += (target,)
         loss_outputs = loss_fn(*loss_inputs)
@@ -91,6 +90,7 @@ def fit(train_dataloader, dev_dataloader, model, loss_fn, optimizer, scheduler, 
             batch_size = 0
             logger.info('Generate Datastore.')
             model.knn_store.reset_dstore()
+            model.eval()
             for i, (data, target) in enumerate(tqdm(ordered_dataloader)):
                 if batch_size == 0: batch_size = target.size()[0]
                 with torch.no_grad():
@@ -169,7 +169,7 @@ def no_args_train(dev_dataloader, test_dataloader, model, device, candidate_k, c
 
     # best_k = 4
     # best_temp = 10
-    # best_param = 0.5
+    # best_param = 0.9
 
     logger.info('Start testing.')
     cnt = 0
