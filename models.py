@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification
 
 
 class PreTrainModel(nn.Module):
@@ -142,6 +142,7 @@ class UpdateKNNAdaptiveConcat(nn.Module):
 
     def forward(self, x_idx, x, x_mask):
         model_prob, text_rep = self.pretrain_model(x, x_mask)
+        model_prob = nn.functional.softmax(model_prob, dim=-1)
         neighbors = None
 
         if self.training or self.fixed_knn:
