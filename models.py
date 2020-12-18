@@ -127,9 +127,6 @@ class UpdateKNNAdaptiveConcat(nn.Module):
                 param.requires_grad = False
 
         self.knn_embedding_model = knn_embedding_model
-        if self.knn_embedding_model is not None:
-            for param in self.knn_embedding_model.parameters():
-                param.requires_grad = False
 
         self.knn_store = knn_store
         self.k = k

@@ -34,11 +34,12 @@ def fine_tune_pretrain_model_generate_datastore(args):
     optimizer, scheduler = get_optimizer(args, model, train_dataloader)
     early_stopping = EarlyStopping(output_path=model_path, patience=3, compare_loss=False)
 
-    logger.info('Start training.')
-    fit(train_dataloader, dev_dataloader, model, criterion, optimizer, scheduler, early_stopping,
-        args.epochs, device, metric)
+    # logger.info('Start training.')
+    # fit(train_dataloader, dev_dataloader, model, criterion, optimizer, scheduler, early_stopping,
+    #     args.epochs, device, metric)
 
     logger.info('Test model with best performance')
+    model.to(device)
     model.load_state_dict(torch.load(model_path))
     test_loss, metric = test_epoch(test_dataloader, model, criterion, device, metric)
     message = '**Test set: Average loss: {:.4f}\t{}: {}'.format(test_loss, metric.name(), metric.value())
@@ -116,6 +117,8 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
     if fixed_knn:
         knn_embedding_model = PreTrainModel(args.pretrain_model_name, args.num_labels, only_return_hidden_states=True)
         knn_embedding_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
+        for param in knn_embedding_model.parameters():
+            param.requires_grad = False
     elif not fixed_knn and not fixed_finetune:
         ordered_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
@@ -224,9 +227,9 @@ if __name__ == '__main__':
     check_dir(arg)  # run at the very start
     # preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
-    # run_no_arg_knn(arg)
+    run_no_arg_knn(arg)
     # fine_tune_with_knn(arg)
-    fine_tune_with_knn(arg, fixed_finetune=True)
+    # fine_tune_with_knn(arg, fixed_finetune=True)
     # fine_tune_with_knn(arg, fixed_knn=True)
     # fine_tune_with_knn(arg, only_knn=True)
     # metric_learning(arg, triplet=True)
