@@ -68,21 +68,30 @@ class KNNDstore(object):
     def read_index(self, faiss_path):
         self.index = faiss.read_index(faiss_path, faiss.IO_FLAG_ONDISK_SAME_DIR)
 
-    def get_knns(self, queries, k, change_type=False):
-        if change_type:
+    def get_knns(self, queries, k, is_tensor=False):
+        if is_tensor:
             queries = queries.detach().cpu().float().numpy()
         dists, knns = self.index.search(queries, k)
         return dists, knns
 
-    def get_knn_prob(self, dists, knns, temperature):
-        probs = torch.nn.functional.softmax(torch.from_numpy(-1 * dists) / temperature, dim=-1)
+    def dist_func(self, queries, knns, k):
+        qsize = queries.shape
+        knns_vecs = torch.from_numpy(self.keys[knns]).cuda().view(qsize[0], k, -1)
+        query_vecs = queries.view(qsize[0], 1, qsize[1]).repeat(1, k, 1)
+        l2 = torch.sum((query_vecs - knns_vecs.detach()) ** 2, dim=2)
+        return l2
+
+    def get_knn_prob(self, dists, knns, temperature, is_numpy=False):
+        if is_numpy:
+            dists = torch.from_numpy(dists).cuda()
+        probs = torch.nn.functional.softmax((-1 * dists) / temperature, dim=-1)
         probs = probs.unsqueeze(dim=-1).repeat(1, 1, self.classes_num)
 
         vals = torch.from_numpy(self.vals[knns]).squeeze(dim=-1)
-        vals = torch.nn.functional.one_hot(vals, num_classes=self.classes_num)
+        vals = torch.nn.functional.one_hot(vals, num_classes=self.classes_num).cuda()
 
         knn_prob = probs.mul(vals)
-        knn_prob = torch.sum(knn_prob, dim=1)
+        knn_prob = torch.sum(knn_prob, dim=1) + 1e-8
         return knn_prob
 
     def save_best(self):

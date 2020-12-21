@@ -5,7 +5,8 @@ import time
 import numpy as np
 from loguru import logger
 from torch.utils.data import DataLoader
-from models import PreTrainModel, OnlyKNN, KNNBackoff, KNNStaticConcat, UpdateKNNAdaptiveConcat
+from models import PreTrainModel, OnlyKNN, KNNBackoff, KNNStaticConcat, UpdateKNNAdaptiveConcat, \
+    KNNBackoffTwoModels, KNNStaticConcatTwoModels
 from knn import KNNDstore
 from parameters import parse
 from datasets import load_tokenized_dataset, BalancedBatchSampler, generate_dataloader, preprocess_data
@@ -34,9 +35,9 @@ def fine_tune_pretrain_model_generate_datastore(args):
     optimizer, scheduler = get_optimizer(args, model, train_dataloader)
     early_stopping = EarlyStopping(output_path=model_path, patience=3, compare_loss=False)
 
-    # logger.info('Start training.')
-    # fit(train_dataloader, dev_dataloader, model, criterion, optimizer, scheduler, early_stopping,
-    #     args.epochs, device, metric)
+    logger.info('Start training.')
+    fit(train_dataloader, dev_dataloader, model, criterion, optimizer, scheduler, early_stopping,
+        args.epochs, device, metric)
 
     logger.info('Test model with best performance')
     model.to(device)
@@ -155,6 +156,41 @@ def fine_tune_with_knn(args, fixed_finetune=False, fixed_knn=False, only_knn=Fal
     logger.success(message)
 
 
+def static_concat_models(args):
+    logger.info('Load models')
+    pretrain_model = PreTrainModel(args.pretrain_model_name, args.num_labels)
+    pretrain_model.load_state_dict(torch.load(args.model_dir + f"{args.pretrain_model_name}.pt"))
+
+    knn_store = KNNDstore(args)
+    knn_store.load_best()
+
+    knn_model = UpdateKNNAdaptiveConcat(PreTrainModel(args.pretrain_model_name, args.num_labels),
+                                        knn_store, args.k, args.temperature, None,
+                                        None, False, False, True)
+    knn_model.load_state_dict(torch.load(args.model_dir + "fine_tune_with_knn(only_knn).pt"))
+
+    logger.info('Load data')
+    _, _, dev_dataloader, test_dataloader = generate_dataloader(args)
+
+    threshold = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    model = KNNStaticConcatTwoModels(pretrain_model, knn_model.pretrain_model, knn_store)
+    model.to(device)
+
+    dev_acc = [0 for _ in range(len(threshold))]
+    cnt = 0
+    for data, target in dev_dataloader:
+        data = tuple(d.to(device) for d in data)
+        cnt += target.size()[-1]
+        for i, th in enumerate(threshold):
+            input = data + (args.k, args.temperature, th)
+            with torch.no_grad():
+                prob = model(*input)
+            dev_acc[i] += (torch.argmax(prob, dim=1) == target).sum().item()
+
+    dev_acc = [acc / cnt for acc in dev_acc]
+    print(dev_acc)
+
+
 def metric_learning(args, triplet=False):
     start_time = time.strftime("-%Y-%m-%d", time.localtime())
     logger.add(args.log_dir + 'metric_learning' + start_time + '.log')
@@ -227,10 +263,11 @@ if __name__ == '__main__':
     check_dir(arg)  # run at the very start
     # preprocess_data(arg)  # run at the very start
     # fine_tune_pretrain_model_generate_datastore(arg)
-    run_no_arg_knn(arg)
+    # run_no_arg_knn(arg)
     # fine_tune_with_knn(arg)
-    # fine_tune_with_knn(arg, fixed_finetune=True)
+    fine_tune_with_knn(arg, fixed_finetune=True)
     # fine_tune_with_knn(arg, fixed_knn=True)
     # fine_tune_with_knn(arg, only_knn=True)
     # metric_learning(arg, triplet=True)
     # metric_learning(arg, triplet=False)
+    # static_concat_models(arg)

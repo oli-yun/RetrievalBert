@@ -40,7 +40,7 @@ class NoArgKNN(nn.Module):
 
     def get_knn_prob(self, queries, k, temperature):
         dists, knns = self.knn_store.get_knns(queries, k, True)
-        knn_prob = self.knn_store.get_knn_prob(dists, knns, temperature)
+        knn_prob = self.knn_store.get_knn_prob(dists, knns, temperature, is_numpy=True)
         return knn_prob
 
     def get_model_prob(self, x, x_mask):
@@ -94,6 +94,29 @@ class KNNBackoff(NoArgKNN):
         return final_prob
 
 
+class KNNBackoffTwoModels(NoArgKNN):
+    """
+    The same as FineTuneKNN
+    But use KNN predictions as backoff.
+    """
+
+    def __init__(self, pretrain_model, knn_model, knn_store):
+        super().__init__(pretrain_model, knn_store)
+        self.knn_model = knn_model
+
+    def forward(self, x, x_mask, k, temperature, threshold):
+        model_prob, _ = self.embedding_model(x, x_mask)
+        model_prob = torch.nn.functional.softmax(model_prob, dim=-1)
+        model_pred = torch.max(model_prob, dim=-1)[0]
+
+        _, queries = self.knn_model(x, x_mask)
+        knn_prob = self.get_knn_prob(queries, k, temperature)
+        final_prob = torch.where(model_pred.unsqueeze(dim=-1)
+                                 .repeat(1, model_prob.size()[-1]).cpu() > threshold,
+                                 model_prob.cpu(), knn_prob.cpu())
+        return final_prob
+
+
 class KNNStaticConcat(NoArgKNN):
     """
     The same as FineTuneKNN
@@ -105,6 +128,26 @@ class KNNStaticConcat(NoArgKNN):
 
     def forward(self, x, x_mask, k, temperature, knn_weight):
         model_prob, queries = self.get_model_prob(x, x_mask)
+        knn_prob = self.get_knn_prob(queries, k, temperature)
+        final_prob = knn_prob.mul(knn_weight).cpu() + model_prob.mul(1 - knn_weight).cpu()
+        return final_prob
+
+
+class KNNStaticConcatTwoModels(NoArgKNN):
+    """
+    The same as FineTuneKNN
+    But concat KNN predictions with pretrain model predictions.
+    """
+
+    def __init__(self, pretrain_model, knn_model, knn_store):
+        super().__init__(pretrain_model, knn_store)
+        self.knn_model = knn_model
+
+    def forward(self, x, x_mask, k, temperature, knn_weight):
+        model_prob, _ = self.embedding_model(x, x_mask)
+        model_prob = torch.nn.functional.softmax(model_prob, dim=-1)
+
+        _, queries = self.knn_model(x, x_mask)
         knn_prob = self.get_knn_prob(queries, k, temperature)
         final_prob = knn_prob.mul(knn_weight).cpu() + model_prob.mul(1 - knn_weight).cpu()
         return final_prob
@@ -147,34 +190,28 @@ class UpdateKNNAdaptiveConcat(nn.Module):
     def forward(self, x_idx, x, x_mask):
         model_prob, text_rep = self.pretrain_model(x, x_mask)
         model_prob = nn.functional.softmax(model_prob, dim=-1)
-        neighbors = None
 
-        if self.training or self.fixed_knn:
-            if self.training:
-                dists, knns = self.knn_store.get_knns(self.knn_store.keys[x_idx.cpu().numpy()],
-                                                      self.k + 1, change_type=False)
-                dists, knns = dists[:, 1:], knns[:, 1:]
-            else:
-                dists, knns = self.knn_store.get_knns(self.knn_embedding_model(x, x_mask), self.k, change_type=True)
-            knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
-            if not self.only_knn:
-                neighbors = []
-                for i in range(self.k):
-                    train_neighbors, _ = self.train_datasets[knns[:, i]]
-                    _, neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
-                    neighbors.append(neighbor.unsqueeze(dim=1))
-                neighbors = torch.cat(neighbors, dim=1)
+        if self.training:
+            _, knns = self.knn_store.get_knns(self.knn_store.keys[x_idx.cpu().numpy()], self.k + 1, is_tensor=False)
+            knns = knns[:, 1:]
         else:
-            dists, knns = self.knn_store.get_knns(text_rep, self.k, change_type=True)
-            knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
-            if not self.only_knn:
-                neighbors = torch.from_numpy(self.knn_store.keys[knns]).type_as(text_rep)
+            _, knns = self.knn_store.get_knns(self.knn_embedding_model(x, x_mask), self.k, is_tensor=True) \
+                if self.fixed_knn else self.knn_store.get_knns(text_rep, self.k, is_tensor=True)
+
+        dists = self.knn_store.dist_func(text_rep, knns, self.k)
+        knn_prob = self.knn_store.get_knn_prob(dists, knns, self.temperature)
 
         if self.only_knn:
             return torch.log(knn_prob.type_as(model_prob))
         else:
-            dists = torch.from_numpy(-1 * dists)
-            neighbor_probs = torch.nn.functional.softmax(dists / self.temperature, dim=-1).type_as(text_rep)
+            neighbors = []
+            for i in range(self.k):
+                train_neighbors, _ = self.train_datasets[knns[:, i]]
+                _, neighbor = self.pretrain_model(train_neighbors[0].type_as(x), train_neighbors[1].type_as(x_mask))
+                neighbors.append(neighbor.unsqueeze(dim=1))
+            neighbors = torch.cat(neighbors, dim=1)
+
+            neighbor_probs = torch.nn.functional.softmax(-1 * dists / self.temperature, dim=-1).type_as(text_rep)
             neighbor_probs = neighbor_probs.unsqueeze(dim=-1).repeat(1, 1, 768)
             neighbor_rep = torch.sum(torch.mul(neighbor_probs, neighbors), dim=1)
 

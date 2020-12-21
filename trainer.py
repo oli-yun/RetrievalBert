@@ -131,6 +131,7 @@ def no_args_train(dev_dataloader, test_dataloader, model, device, candidate_k, c
     for data, target in tqdm(dev_dataloader):
         cnt += target.size()[0]
         data = tuple(d.to(device) for d in data)
+        target = target.to(device)
         for i, k in enumerate(candidate_k):
             for j, temperature in enumerate(candidate_tmp):
                 loop_list = [0] if candidate_other is None else candidate_other
@@ -177,6 +178,7 @@ def no_args_train(dev_dataloader, test_dataloader, model, device, candidate_k, c
     for data, target in test_dataloader:
         cnt += target.size()[0]
         data = tuple(d.to(device) for d in data)
+        target = target.to(device)
         data = data + (best_k, best_temp) if candidate_other is None else data + (best_k, best_temp, best_param)
         prob = model(*data)
         test_acc += (torch.argmax(prob, dim=1) == target).sum().item()
