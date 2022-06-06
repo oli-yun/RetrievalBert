@@ -1,3 +1,4 @@
+import os
 import torch
 from tqdm import tqdm
 import torch.nn as nn
@@ -17,6 +18,7 @@ from metrics import AccumulatedAccuracyMetric
 from losses import OnlineTripletLoss, OnlineContrastiveLoss
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def fine_tune_pretrain_model_generate_datastore(args):
@@ -261,8 +263,8 @@ if __name__ == '__main__':
     set_seed(arg.seed)
 
     check_dir(arg)  # run at the very start
-    # preprocess_data(arg)  # run at the very start
-    # fine_tune_pretrain_model_generate_datastore(arg)
+    preprocess_data(arg)  # run at the very start
+    fine_tune_pretrain_model_generate_datastore(arg)  # run at the very start
     # run_no_arg_knn(arg)
     # fine_tune_with_knn(arg)
     fine_tune_with_knn(arg, fixed_finetune=True)
